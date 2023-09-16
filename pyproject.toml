@@ -1,0 +1,68 @@
+[build-system]
+requires = [
+    "setuptools>=42",
+    "wheel",
+    "setuptools-scm",
+]
+
+[project]
+name = "xpresscli"
+dynamic = ["version"]
+license = {text = "Apache Software License 2.0"}
+authors = [
+    {name = "Paul K Korir"},
+    {email = "paul.korir@gmail.com"}
+]
+description = "Library to simplify the process of creating powerful CLI parsers"
+readme = "README.md"
+requires-python = ">=3.6"
+keywords = [
+    "cli",
+    "parser",
+    "command",
+    "line",
+    "interface",
+    "argument",
+    "option",
+    "subcommand",
+    "subparser",
+    "argparse",
+    "argh",
+    "click",
+    "docopt",
+    "getopt",
+    "getopts",
+    "optparse",
+    "optik",
+    "optparse",
+    "python",
+    "python3",
+    "argparse",
+    "argparse-subcommand",
+    "argparse-subparsers",
+    "argparse-subparser",
+    "argparse-subcommand-parser",
+    "argparse-subcommands",
+    "argparse",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = []
+
+[project.urls]
+homepage = "https://github.com/paulkorir/xpresscli"
+documentation = "https://github.com/paulkorir/xpresscli"
+repository = "https://github.com/paulkorir/xpresscli"
+changelog = "https://github.com/paulkorir/xpresscli"
