@@ -255,12 +255,12 @@ action = "store_true"
 ```python
 import sys
 
-from client import Client
+import xpresscli as xcli
 
 
 def main():
     """Entry point for the application script"""
-    with Client() as cli:
+    with xcli.Client() as cli:
         exit_status = cli.execute()
     return exit_status
 
