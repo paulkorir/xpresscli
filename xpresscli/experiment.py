@@ -5,6 +5,8 @@ import sys
 import unittest
 
 
+# todo: create ArgumentParser subclass
+
 def create_parser(json_specs):
     """
     Create an ArgumentParser with the desired arguments.
@@ -16,7 +18,13 @@ def create_parser(json_specs):
     parser = argparse.ArgumentParser(**specs['parser'])
     if 'subparser' in specs:
         if specs['subparser'] is not None:
-            parser.add_subparsers(**specs['subparser'])
+            parser.subparsers = parser.add_subparsers(**specs['subparser'])
+            # process options
+            if not specs['subparser']['required']:
+                parser = create_parser_arguments(parser, specs['options'])
+            else:
+                if 'options' in specs:
+                    print(f"warning: options ignored for required subparser", file=sys.stderr)
     return parser
 
 
@@ -31,27 +39,42 @@ def create_parser_arguments(parser, json_specs):
     Returns:
         argparse.ArgumentParser: Configured argument parser.
     """
-    specs = json.loads(json_specs)
+    if isinstance(json_specs, str):
+        specs = json.loads(json_specs)
+    elif isinstance(json_specs, list):
+        specs = json_specs
+    else:
+        raise TypeError(f"json_specs must be a string or list, not {type(json_specs)}")
 
     for arg_spec in specs:
-        # print(f"{arg_spec = }")
         # Add the argument to the parser
-        print(f"{arg_spec['args'] = }")
-        parser.add_argument(*arg_spec['args'], **arg_spec['kwargs'])
+        flag = arg_spec.pop('flag')
+        parser.add_argument(*flag, **arg_spec)
     return parser
 
 
-def create_subparser(parser, json_specs):
+def create_commands(parser, json_specs):
     """
-    Create an ArgumentParser with the desired arguments.
+    Create a command for a subparser.
+
+    Args:
+        parser (argparse.ArgumentParser): parser to add the arguments to.
+        json_specs (str): JSON string containing the argument specifications.
 
     Returns:
         argparse.ArgumentParser: Configured argument parser.
     """
+    assert parser.subparsers is not None, "Parser must have subparsers"
     specs = json.loads(json_specs)
-    subparser = parser.add_subparsers(**specs)
-    print(f"{subparser = }")
-    return subparser
+
+    for command_spec in specs['commands']:
+        # Create the subparser
+        options = command_spec.pop('options')
+        command_parser = parser.subparsers.add_parser(**command_spec)
+
+        create_parser_arguments(command_parser, options)
+
+    return parser
 
 
 def main():
@@ -87,54 +110,8 @@ if __name__ == '__main__':
 
 # unittests
 class Tests(unittest.TestCase):
-    def test_create_parser(self):
-        """
-        Test the example provided in the question.
-        """
-        json_specs = """
-        {
-            "prog": "test",
-            "description": "Custom script with dynamic arguments"
-        }
-        """
-        parser = create_parser(json_specs)
-        print(parser)
-        args = parser.parse_args()
-        self.assertIsInstance(args, argparse.Namespace)
-
-    def test_create_parser_arguments(self):
-        """
-        Test the example provided in the question.
-        """
-        # todo: there will have to be a way to prevent the wrong arguments from being passed; perhaps a schema enforced?
-        parser_specs = """
-        {
-            "prog": "test",
-            "description": "Custom script with dynamic arguments"
-        }
-        """
-        json_specs = """
-        [
-            {"args": ["input_file"], "kwargs": {"help": "Path to the input file"}},
-            {"args": ["-o"], "kwargs": {"help": "Path to the output file"}},
-            {"args": ["--verbose"], "kwargs": {"help": "Enable verbose mode", "action": "store_true"}}
-        ]
-        """
-        sys.argv = shlex.split('script.py input.txt -o output.txt --verbose')
-        parser = create_parser(parser_specs)
-        parser = create_parser_arguments(parser, json_specs)
-        print(parser)
-        args = parser.parse_args()
-        self.assertIsInstance(args, argparse.Namespace)
-        self.assertEqual(args.input_file, 'input.txt')
-        self.assertEqual(args.o, 'output.txt')
-        self.assertTrue(args.verbose)
-
-    def test_create_subparser(self):
-        """
-        Test the example provided in the question.
-        """
-        parser_specs = """
+    def setUp(self):
+        self.parser_specs = """
         {
             "parser": {
                 "prog": "test",
@@ -145,11 +122,62 @@ class Tests(unittest.TestCase):
                 "title": "subcommands",
                 "description": "valid subcommands",
                 "dest": "subcommand",
-                "required": true
+                "required": false
+            },
+            "options": [
+                {"flag": ["-x"], "help": "Path to the output file"},
+                {"flag": ["-w"], "help": "Enable verbose mode", "action": "store_true"}
+            ],
+            "commands": [
+            {
+                "name": "command",
+                "help": "command help",
+                "options": [
+                    {"flag": ["input_file"], "help": "Path to the input file"},
+                    {"flag": ["-o"], "help": "Path to the output file"},
+                    {"flag": ["--verbose"], "help": "Enable verbose mode", "action": "store_true"}
+                ]
             }
+            ]
         }
         """
-        parser = create_parser(parser_specs)
+
+    def test_create_parser(self):
+        """
+        Test the example provided in the question.
+        """
+        parser = create_parser(self.parser_specs)
+        sys.argv = shlex.split('script.py -x 37 -w')
+        print(parser)
+        args = parser.parse_args()
+        self.assertIsInstance(args, argparse.Namespace)
+
+    def test_create_parser_arguments(self):
+        """
+        Test the example provided in the question.
+        """
+        # todo: there will have to be a way to prevent the wrong arguments from being passed; perhaps a schema enforced?
+        sys.argv = shlex.split('script.py -x 37 -w')
+        parser = create_parser(self.parser_specs)
+        args = parser.parse_args()
+        self.assertIsInstance(args, argparse.Namespace)
+        self.assertEqual('37', args.x)
+        self.assertTrue(args.w)
+
+    def test_create_subparser(self):
+        """
+        Test the example provided in the question.
+        """
+        parser = create_parser(self.parser_specs)
         print(f"{parser._subparsers = }")
         self.assertIsInstance(parser, argparse.ArgumentParser)
         self.assertIsNotNone(parser._subparsers)
+
+    def test_create_command(self):
+        """Add a command to a subparser."""
+        parser = create_parser(self.parser_specs)
+        print(f"{parser._subparsers = }")
+        parser = create_commands(parser, self.parser_specs)
+        sys.argv = shlex.split('script.py command input.txt -o output.txt --verbose')
+        args = parser.parse_args()
+        print(f"{args = }")
