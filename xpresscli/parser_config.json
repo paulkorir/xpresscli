@@ -1,0 +1,55 @@
+{
+  "program_name": "DynamicCLI",
+  "description": "Command Line Argument Processor with Subparsers from JSON",
+  "commands": [
+    {
+      "name": "echo",
+      "help": "Echo back a provided string",
+      "arguments": [
+        {
+          "name": "text",
+          "type": "str",
+          "help": "Text to echo back"
+        },
+        {
+          "name": "--number",
+          "type": "int",
+          "default": 1,
+          "help": "Number of times to echo. Default is 1."
+        },
+        {
+          "name": "--verbose",
+          "type": "store_true",
+          "help": "Increase output verbosity"
+        }
+      ]
+    },
+    {
+      "name": "calculate",
+      "help": "Perform arithmetic operations",
+      "arguments": [
+        {
+          "name": "operation",
+          "type": "str",
+          "choices": [
+            "add",
+            "subtract",
+            "multiply",
+            "divide"
+          ],
+          "help": "Arithmetic operation to perform"
+        },
+        {
+          "name": "x",
+          "type": "float",
+          "help": "First operand"
+        },
+        {
+          "name": "y",
+          "type": "float",
+          "help": "Second operand"
+        }
+      ]
+    }
+  ]
+}

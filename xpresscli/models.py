@@ -1,8 +1,6 @@
 import argparse
-import io
-import shlex
-import sys
 import configparser
+import json
 
 
 class Validator:
@@ -54,44 +52,95 @@ class Manager:
         return exit_status
 
 
-class Client:
-    """User facing class used to instantiate a xpresscli object"""
-    # there should be only one instance of this class therefore we use a singleton pattern
-    parser = Parser()
-    manager = Manager()
-    # client_file_parser = ClientTOMLParser
+# class Client:
+#     """User facing class used to instantiate a xpresscli object"""
+#     # there should be only one instance of this class therefore we use a singleton pattern
+#     parser = Parser()
+#     manager = Manager()
+#
+#     # client_file_parser = ClientTOMLParser
+#
+#     def __init__(self, client_file='cli.toml'):
+#         self._client_file = client_file
+#
+#     def _initialise(self):
+#         with open(self._client_file) as f:
+#             client_definition = self._parse_client_file(f)
+#             self._initialise_parser(client_definition)
+#             self._initialise_manager(client_definition)
+#
+#     def _parse_client_file(self, f: io.TextIOWrapper) -> dict:
+#         """Parse the xpresscli file
+#
+#         At the moment the xpresscli file is a TOML file but this could change in the future.
+#         """
+#         client_definition = dict()
+#         # todo: parse the xpresscli file
+#         # client_definition = self.client_file_parser.parse(f)
+#         return client_definition
+#
+#     def _initialise_parser(self, client_definition: dict) -> None:
+#         # todo: initialise the parser
+#         self.parser(
+#             client_definition,
+#         )  # better name?
+#
+#     def _initialise_manager(self, client_definition):
+#         # todo: initialise the manager
+#         self.manager.initialise(client_definition)  # better name?
+#
+#     def cli(self, command_str=None) -> argparse.Namespace:
+#         if command_str is not None:
+#             sys.argv = shlex.split(command_str)
+#         command = self.parser.parse()
+#         return command
 
-    def __init__(self, client_file='cli.toml'):
-        self._client_file = client_file
 
-    def _initialise(self):
-        with open(self._client_file) as f:
-            client_definition = self._parse_client_file(f)
-            self._initialise_parser(client_definition)
-            self._initialise_manager(client_definition)
+class DynamicParser:
+    def __init__(self, config_filename):
+        self.config = self._load_parser_config(config_filename)
+        self.parser = self._create_parser_from_config()
 
-    def _parse_client_file(self, f: io.TextIOWrapper) -> dict:
-        """Parse the xpresscli file
+    def _load_parser_config(self, filename):
+        with open(filename, 'r') as f:
+            return json.load(f)
 
-        At the moment the xpresscli file is a TOML file but this could change in the future.
-        """
-        client_definition = dict()
-        # todo: parse the xpresscli file
-        # client_definition = self.client_file_parser.parse(f)
-        return client_definition
+    def _create_parser_from_config(self):
+        parser = argparse.ArgumentParser(prog=self.config["program_name"], description=self.config["description"])
+        subparsers = parser.add_subparsers(dest="command")
 
-    def _initialise_parser(self, client_definition: dict) -> None:
-        # todo: initialise the parser
-        self.parser(
-            client_definition,
-        )  # better name?
+        for subcommand in self.config["commands"]:
+            subparser = subparsers.add_parser(subcommand["name"], help=subcommand["help"])
+            for arg in subcommand["arguments"]:
+                kwargs = {
+                    'help': arg.get('help', ''),
+                    'default': arg.get('default')
+                }
 
-    def _initialise_manager(self, client_definition):
-        # todo: initialise the manager
-        self.manager.initialise(client_definition)  # better name?
+                if 'choices' in arg:
+                    kwargs['choices'] = arg['choices']
 
-    def cli(self, command_str=None) -> argparse.Namespace:
-        if command_str is not None:
-            sys.argv = shlex.split(command_str)
-        command = self.parser.parse()
-        return command
+                arg_type = arg.get('type')
+                if arg_type == "store_true":
+                    kwargs['action'] = 'store_true'
+                elif arg_type:
+                    kwargs['type'] = eval(arg_type)  # Using eval to map the type string to an actual type
+
+                subparser.add_argument(arg["name"], **kwargs)
+
+        return parser
+
+    def parse_args(self):
+        return self.parser.parse_args()
+
+
+def main():
+    dynamic_parser = DynamicParser('parser_config.json')
+    args = dynamic_parser.parse_args()
+    print(args)
+
+    # ... (Your original logic to handle commands) ...
+
+
+if __name__ == "__main__":
+    main()
