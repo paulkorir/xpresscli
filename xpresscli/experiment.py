@@ -119,6 +119,15 @@ class Tests(unittest.TestCase):
                     {"flag": ["-o"], "help": "Path to the output file"},
                     {"flag": ["--verbose"], "help": "Enable verbose mode", "action": "store_true"}
                 ]
+            },
+            {
+                "name": "command2",
+                "help": "command2 help",
+                "options": [
+                    {"flag": ["input_file"], "help": "Path to the input file"},
+                    {"flag": ["-o"], "help": "Path to the output file"},
+                    {"flag": ["--verbose"], "help": "Enable verbose mode", "action": "store_true"}
+                ]
             }
             ]
         }
@@ -161,5 +170,8 @@ class Tests(unittest.TestCase):
         print(f"{parser._subparsers = }")
         parser = create_commands(parser, self.parser_specs)
         sys.argv = shlex.split('script.py command input.txt -o output.txt --verbose')
+        args = parser.parse_args()
+        print(f"{args = }")
+        sys.argv = shlex.split('script.py command2 input.txt -o output.txt --verbose')
         args = parser.parse_args()
         print(f"{args = }")
