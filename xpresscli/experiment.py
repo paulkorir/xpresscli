@@ -5,17 +5,22 @@ import sys
 import unittest
 
 
-# todo: create ArgumentParser subclass
+class CLIParser(argparse.ArgumentParser):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.subparsers = None
+
 
 def create_parser(json_specs):
     """
     Create an ArgumentParser with the desired arguments.
 
     Returns:
-        argparse.ArgumentParser: Configured argument parser.
+        CLIParser: Configured argument parser.
     """
     specs = json.loads(json_specs)
-    parser = argparse.ArgumentParser(**specs['parser'])
+    parser = CLIParser(**specs['parser'])
     if 'subparser' in specs:
         if specs['subparser'] is not None:
             parser.subparsers = parser.add_subparsers(**specs['subparser'])
@@ -58,11 +63,11 @@ def create_commands(parser, json_specs):
     Create a command for a subparser.
 
     Args:
-        parser (argparse.ArgumentParser): parser to add the arguments to.
+        parser (CLIParser): parser to add the arguments to.
         json_specs (str): JSON string containing the argument specifications.
 
     Returns:
-        argparse.ArgumentParser: Configured argument parser.
+        CLIParser: Configured argument parser.
     """
     assert parser.subparsers is not None, "Parser must have subparsers"
     specs = json.loads(json_specs)
@@ -78,30 +83,7 @@ def create_commands(parser, json_specs):
 
 
 def main():
-    # Example JSON specifications
-    json_argument_specs = """
-    [
-        {"name": "input_file", "help": "Path to the input file"},
-        {"name": "-o", "help": "Path to the output file"},
-        {"name": "--verbose", "help": "Enable verbose mode", "action": "store_true"}
-    ]
-    """
-
-    # Create the parser using the JSON specifications
-    parser = create_parser_arguments(json_argument_specs)
-
-    # Parse the command-line arguments
-    args = parser.parse_args()
-
-    # Access the values
-    input_file = args.input_file
-    output_file = args.o
-    verbose = args.verbose
-
-    # Your script logic here
-    print(f"Input file: {input_file}")
-    print(f"Output file: {output_file}")
-    print(f"Verbose mode: {verbose}")
+    return 0
 
 
 if __name__ == '__main__':
@@ -169,9 +151,9 @@ class Tests(unittest.TestCase):
         Test the example provided in the question.
         """
         parser = create_parser(self.parser_specs)
-        print(f"{parser._subparsers = }")
-        self.assertIsInstance(parser, argparse.ArgumentParser)
-        self.assertIsNotNone(parser._subparsers)
+        print(f"{parser.subparsers = }")
+        self.assertIsInstance(parser, CLIParser)
+        self.assertIsNotNone(parser.subparsers)
 
     def test_create_command(self):
         """Add a command to a subparser."""
