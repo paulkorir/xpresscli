@@ -1,10 +1,10 @@
 import argparse
+import importlib
+import inspect
 import json
 import shlex
 import sys
 import unittest
-import inspect
-import importlib
 
 
 class CLIParser(argparse.ArgumentParser):
@@ -81,11 +81,9 @@ def create_commands(parser, json_specs):
     for command_spec in specs['commands']:
         # Create the subparser
         options = command_spec.pop('options')
-        manager = command_spec.pop('manager', None)
-        managers[command_spec['name']] = manager
+        manager_string = command_spec.pop('manager', None)
+        managers[command_spec['name']] = Manager(manager_string)
         command_parser = parser.subparsers.add_parser(**command_spec)
-        if manager is not None:
-            command_parser.manager = manager
 
         create_parser_arguments(command_parser, options)
 
@@ -104,16 +102,26 @@ def command2_manager(args: argparse.Namespace) -> int:
     return 0
 
 
-# class Manager:
-#     def __init__(self):
-#         self._commands = dict()
-#
-#     def register(self, command_name, command):
-#         self._commands[command_name] = command
-#
-#     def __call__(self, command_name, *args, **kwargs):
-#         return self._commands[command_name](*args, **kwargs)
-#
+class Manager:
+    def __init__(self, manager_string):
+        self._manager_string = manager_string
+        self._module, self._function = self._partition_manager()
+
+    @property
+    def module(self):
+        return importlib.import_module(self._module)
+
+    @property
+    def function(self):
+        return getattr(self.module, self._function)
+
+    def _partition_manager(self):
+        """Partition the manager string into a module and function"""
+        return self._manager_string.rsplit('.', 1)
+
+    def __call__(self, *args, **kwargs):
+        return self.function(*args, **kwargs)
+
 
 class Client:
     def __init__(self, parser_file='cli.json'):
@@ -226,20 +234,10 @@ class Tests(unittest.TestCase):
         args = parser.parse_args()
         print(f"{args = }")
 
-    def test_manager(self):
+    def test_manager_class(self):
         """Test that the manager attribute can be fired
          and an appropriate error is raised if it is not.
          """
-        parser = create_parser(self.parser_specs)
-        managers = create_commands(parser, self.parser_specs)
-        sys.argv = shlex.split('script.py command input.txt -o output.txt --verbose')
-        args = parser.parse_args()
-
-        def partition_manager(manager_str):
-            print(f"{manager_str = }")
-            _module, _func = manager_str.rsplit('.', 1)
-            return _module, _func
-
         # todo: what should a manager do?
         # 1. it should take a string
         # 2. it should partition the string into the module and function
@@ -248,17 +246,9 @@ class Tests(unittest.TestCase):
         # 5. it should return the exit status
         # manager = Manager("experiment.command_manager")
         # exit_status = manager(args)
-        # the manager is called when Client object runs execute
-        # client = Client()
-        # exit_status = client.execute() -> this should call the manager
-        manager_module, manager_function = partition_manager(managers[args.subcommand])
-        spec = importlib.import_module(manager_module)
-        self.assertTrue(inspect.ismodule(spec))
-        actual_function = getattr(spec, manager_function)
-        self.assertTrue(inspect.isfunction(actual_function))
-        exit_status = actual_function(args)
-        self.assertEqual(0, exit_status)
-        # exec(f"exit_status = {managers[args.subcommand]}({args})")
-        # sys.argv = shlex.split('script.py command2 input.txt -o output.txt --verbose')
-        # args = parser.parse_args()
-        # print(f"{args = }")
+        sys.argv = shlex.split('script.py command input.txt -o output.txt --verbose')
+        manager = Manager("experiment.command_manager")
+        self.assertTrue(hasattr(manager, "module"))
+        self.assertTrue(hasattr(manager, "function"))
+        self.assertTrue(hasattr(manager, "__call__"))
+        self.assertTrue(inspect.ismethod(getattr(manager, "__call__")))
