@@ -3,6 +3,8 @@ import json
 import shlex
 import sys
 import unittest
+import inspect
+import importlib
 
 
 class CLIParser(argparse.ArgumentParser):
@@ -10,6 +12,7 @@ class CLIParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.subparsers = None
+        self.manager = None
 
 
 def create_parser(json_specs):
@@ -72,14 +75,58 @@ def create_commands(parser, json_specs):
     assert parser.subparsers is not None, "Parser must have subparsers"
     specs = json.loads(json_specs)
 
+    # we have to think of a manager as a diction of commands to callables
+    # the only problem with a plain dict is that we can't do any validation
+    managers = dict()
     for command_spec in specs['commands']:
         # Create the subparser
         options = command_spec.pop('options')
+        manager = command_spec.pop('manager', None)
+        managers[command_spec['name']] = manager
         command_parser = parser.subparsers.add_parser(**command_spec)
+        if manager is not None:
+            command_parser.manager = manager
 
         create_parser_arguments(command_parser, options)
 
-    return parser
+    return managers
+
+
+def command_manager(args: argparse.Namespace) -> int:
+    """The manager for the 'command' command."""
+    print(f"{args = }")
+    return 0
+
+
+def command2_manager(args: argparse.Namespace) -> int:
+    """The manager for the 'command' command."""
+    print(f"{args = }")
+    return 0
+
+
+# class Manager:
+#     def __init__(self):
+#         self._commands = dict()
+#
+#     def register(self, command_name, command):
+#         self._commands[command_name] = command
+#
+#     def __call__(self, command_name, *args, **kwargs):
+#         return self._commands[command_name](*args, **kwargs)
+#
+
+class Client:
+    def __init__(self, parser_file='cli.json'):
+        self.parser = create_parser(parser_file)
+        self.managers = create_commands(self.parser, parser_file)
+
+    def execute(self, command=None):
+        """Execute the command using the parser and manager"""
+        args = self.parser.parse_args(command)
+        # we need to know the name of the subcommand destination
+        # manager = self.managers[self.subparser.dest]
+        manager = self.managers[args.command]
+        return manager(args)
 
 
 def main():
@@ -118,7 +165,8 @@ class Tests(unittest.TestCase):
                     {"flag": ["input_file"], "help": "Path to the input file"},
                     {"flag": ["-o"], "help": "Path to the output file"},
                     {"flag": ["--verbose"], "help": "Enable verbose mode", "action": "store_true"}
-                ]
+                ],
+                "manager": "experiment.command_manager"
             },
             {
                 "name": "command2",
@@ -127,7 +175,8 @@ class Tests(unittest.TestCase):
                     {"flag": ["input_file"], "help": "Path to the input file"},
                     {"flag": ["-o"], "help": "Path to the output file"},
                     {"flag": ["--verbose"], "help": "Enable verbose mode", "action": "store_true"}
-                ]
+                ],
+                "manager": "experiment.command2_manager"
             }
             ]
         }
@@ -168,10 +217,48 @@ class Tests(unittest.TestCase):
         """Add a command to a subparser."""
         parser = create_parser(self.parser_specs)
         print(f"{parser._subparsers = }")
-        parser = create_commands(parser, self.parser_specs)
+        managers = create_commands(parser, self.parser_specs)
+        print(f"{managers = }")
         sys.argv = shlex.split('script.py command input.txt -o output.txt --verbose')
         args = parser.parse_args()
         print(f"{args = }")
         sys.argv = shlex.split('script.py command2 input.txt -o output.txt --verbose')
         args = parser.parse_args()
         print(f"{args = }")
+
+    def test_manager(self):
+        """Test that the manager attribute can be fired
+         and an appropriate error is raised if it is not.
+         """
+        parser = create_parser(self.parser_specs)
+        managers = create_commands(parser, self.parser_specs)
+        sys.argv = shlex.split('script.py command input.txt -o output.txt --verbose')
+        args = parser.parse_args()
+
+        def partition_manager(manager_str):
+            print(f"{manager_str = }")
+            _module, _func = manager_str.rsplit('.', 1)
+            return _module, _func
+
+        # todo: what should a manager do?
+        # 1. it should take a string
+        # 2. it should partition the string into the module and function
+        # 3. it should import the module
+        # 4. it should call the function
+        # 5. it should return the exit status
+        # manager = Manager("experiment.command_manager")
+        # exit_status = manager(args)
+        # the manager is called when Client object runs execute
+        # client = Client()
+        # exit_status = client.execute() -> this should call the manager
+        manager_module, manager_function = partition_manager(managers[args.subcommand])
+        spec = importlib.import_module(manager_module)
+        self.assertTrue(inspect.ismodule(spec))
+        actual_function = getattr(spec, manager_function)
+        self.assertTrue(inspect.isfunction(actual_function))
+        exit_status = actual_function(args)
+        self.assertEqual(0, exit_status)
+        # exec(f"exit_status = {managers[args.subcommand]}({args})")
+        # sys.argv = shlex.split('script.py command2 input.txt -o output.txt --verbose')
+        # args = parser.parse_args()
+        # print(f"{args = }")
