@@ -417,7 +417,7 @@ class Tests(unittest.TestCase):
                 "mutually_exclusive_groups": [
                     {
                         "title": "mutex_group",
-                        "required": True,
+                        "required": False,
                         "options": [
                             {
                                 "flag": [
@@ -472,7 +472,7 @@ class Tests(unittest.TestCase):
         sys.argv = shlex.split('script.py command input.txt -o output.txt --verbose')
         args = parser.parse_args()
         self.assertEqual('command', args.subcommand)
-        sys.argv = shlex.split('script.py command2 input.txt -o output.txt --verbose')
+        sys.argv = shlex.split('script.py command2 input.txt -o output.txt --verbose -f nothing')
         args = parser.parse_args()
         self.assertEqual('command2', args.subcommand)
 
