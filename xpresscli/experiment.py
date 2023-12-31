@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 import argparse
+import configparser
 import importlib
 import inspect
 import json
+import os
 import shlex
 import sys
 import unittest
+import pathlib
+from typing import Union, Optional, Iterable, List
 
 
 def parse_options(parser, options):
@@ -18,6 +24,9 @@ def parse_options(parser, options):
     for arg_spec in specs:
         # Add the argument to the parser
         flag = arg_spec.pop('flag')
+        # fixme: convert string types to actual types
+        if 'type' in arg_spec:
+            arg_spec['type'] = eval(arg_spec['type'])
         parser.add_argument(*flag, **arg_spec)
 
 
@@ -56,10 +65,29 @@ def parse_mutually_exclusive_groups(parser, mutex_groups):
     return mutex_groups
 
 
+def parse_parents(parent_parsers_spec) -> Dict[argparse.ArgumentParser]:
+    """Parse the parent parsers"""
+    if isinstance(parent_parsers_spec, str):
+        specs = json.loads(parent_parsers_spec)
+    elif isinstance(parent_parsers_spec, list):
+        specs = parent_parsers_spec
+    else:
+        raise TypeError(f"json_specs must be a string or list, not {type(parent_parsers_spec)}")
+    parent_parsers = dict()
+    for parent_spec in specs:
+        name = parent_spec['prog']
+        options = parent_spec.pop('options')
+        # Add the group to the parser
+        parent_parsers[name] = argparse.ArgumentParser(**parent_spec)
+        parse_options(parent_parsers[name], options)
+    return parent_parsers
+
+
 class CLIParser(argparse.ArgumentParser):
 
     def __init__(self, parser_spec: dict):
         self._parser_spec = parser_spec.get('parser')
+        self._parent_parsers_spec = self._parser_spec.pop('parent_parsers', None)
         self._subparsers_spec = self._parser_spec.pop('subparsers', None)
         self._options = self._parser_spec.pop('options', None)
         self._groups_spec = self._parser_spec.pop('groups', None)
@@ -71,15 +99,14 @@ class CLIParser(argparse.ArgumentParser):
         # what do I want from the subparsers?
         # 2. add a subparser to the subparser to some maximum depth
         # 3. add the commands to the subparser
+        self.parent_parsers = parse_parents(self._parent_parsers_spec)
         self.subparsers = self._parse_subparsers(self._subparsers_spec)
         # prepare the parser
         parse_options(self, self._options)
         # prepare the groups
         self.groups = parse_groups(self, self._groups_spec)
-        print(f"{self.groups = }")
         # prepare the mutually exclusive groups
         self.mutually_exclusive_groups = parse_mutually_exclusive_groups(self, self._mutually_exclusive_groups_spec)
-        print(f"{self.mutually_exclusive_groups = }")
 
     def _parse_subparsers(self, subparsers_spec):
         if subparsers_spec is not None:
@@ -93,15 +120,72 @@ class CLIParser(argparse.ArgumentParser):
             # add the commands
             for command in commands:
                 options = command.pop('options', None)
+                groups = command.pop('groups', None)
+                mutex_groups = command.pop('mutually_exclusive_groups', None)
                 manager_string = command.pop('manager', None)
                 self.managers[command['name']] = Manager(manager_string)
-                command_parser = subparsers.add_parser(**command)
+                _parents = command.pop('parents', None)
+                if _parents is not None:
+                    parents = [self.parent_parsers[parent] for parent in _parents]
+                else:
+                    parents = []
+                command_parser = subparsers.add_parser(**command, parents=parents)
                 if options is not None:
                     parse_options(command_parser, options)
+                    if groups is not None:
+                        parse_groups(command_parser, groups)
+                    if mutex_groups is not None:
+                        parse_mutually_exclusive_groups(command_parser, mutex_groups)
             return subparsers
 
     def __str__(self):
         return self.format_help()
+
+
+class LocalConfigParser(configparser.ConfigParser):
+    """A local config parser that can be used to parse a config file."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(
+            interpolation=configparser.ExtendedInterpolation(),
+            converters={
+                'list': self.get_list,
+                'tuple': self.get_tuple,
+                'python': self.get_python,
+            }, *args, **kwargs)
+        self._filenames = None
+
+    @property
+    def filenames(self):
+        return self._filenames
+
+    def read(self, filenames: Union[os.PathLike, Iterable[os.PathLike]], encoding: Optional[str] = None) -> List[str]:
+        self._filenames = filenames
+        return super().read(filenames, encoding)
+
+    def __str__(self):
+        string = ""
+        for section in self.sections():
+            string += f"[{section}]\n"
+            for option in self[section]:
+                string += f"{option} = {self.get(section, option, raw=True)}\n"
+            string += "\n"
+        return string
+
+    @staticmethod
+    def get_list(value):
+        """Convert the option value to a list"""
+        return list(map(lambda s: s.strip(), value.split(',')))
+
+    @staticmethod
+    def get_tuple(value):
+        """Convert the option value to a tuple"""
+        return tuple(map(lambda s: s.strip(), value.split(',')))
+
+    @staticmethod
+    def get_python(value):
+        """Evaluate the option value as literal Python code"""
+        return eval(value)
 
 
 def command_manager(args: argparse.Namespace) -> int:
@@ -167,9 +251,31 @@ class Tests(unittest.TestCase):
     def setUp(self):
         self.parser_spec = {
             "parser": {
-                "prog": "test",
+                "prog": "oil",
                 "description": "Custom script with dynamic arguments",
                 "add_help": True,
+                "parent_parsers": [
+                    {
+                        "prog": "parent1",
+                        "add_help": False,
+                        "options": [
+                            {
+                                "flag": [
+                                    "--config-file"
+                                ],
+                                "type": "pathlib.Path",
+                                "help": "Path to the config file"
+                            },
+                            {
+                                "flag": [
+                                    "--dry-run"
+                                ],
+                                "help": "Dry run mode",
+                                "action": "store_true"
+                            }
+                        ]
+                    }
+                ],
                 "subparsers": {
                     "title": "subcommands",
                     "description": "valid subcommands",
@@ -180,6 +286,7 @@ class Tests(unittest.TestCase):
                         {
                             "name": "command",
                             "help": "command help",
+                            "parents": ["parent1"],
                             "options": [
                                 {
                                     "flag": [
@@ -225,6 +332,27 @@ class Tests(unittest.TestCase):
                                     ],
                                     "help": "Enable verbose mode",
                                     "action": "store_true"
+                                }
+                            ],
+                            "mutually_exclusive_groups": [
+                                {
+                                    "title": "mutex_group",
+                                    "required": True,
+                                    "options": [
+                                        {
+                                            "flag": [
+                                                "-f"
+                                            ],
+                                            "help": "Never option",
+                                        },
+                                        {
+                                            "flag": [
+                                                "-g"
+                                            ],
+                                            "help": "Mixed option",
+                                            "action": "store_true"
+                                        }
+                                    ]
                                 }
                             ],
                             "manager": "experiment.command2_manager"
@@ -307,7 +435,13 @@ class Tests(unittest.TestCase):
                         ]
                     }
                 ]
-            }
+            },
+            # "config": {
+            #     "format": "ini",
+            #     "filename": "config.ini",
+            #     "location": "user",
+            #     "create": True
+            # }
         }
 
     def test_create_parser(self):
@@ -328,14 +462,12 @@ class Tests(unittest.TestCase):
         """
         Test the example provided in the question.
         """
-        # parser = CLIParser(parser_spec=json.loads(self.parser_spec))
         parser = CLIParser(parser_spec=self.parser_spec)
         self.assertIsInstance(parser, CLIParser)
         self.assertIsNotNone(parser.subparsers)
 
     def test_create_command(self):
         """Add a command to a subparser."""
-        # parser = CLIParser(parser_spec=json.loads(self.parser_spec))
         parser = CLIParser(parser_spec=self.parser_spec)
         sys.argv = shlex.split('script.py command input.txt -o output.txt --verbose')
         args = parser.parse_args()
@@ -357,7 +489,6 @@ class Tests(unittest.TestCase):
         # manager = Manager("experiment.command_manager")
         # exit_status = manager(args)
         sys.argv = shlex.split('script.py command input.txt -o output.txt --verbose')
-        # parser = CLIParser(parser_spec=json.loads(self.parser_spec))
         parser = CLIParser(parser_spec=self.parser_spec)
         args = parser.parse_args()
         manager = parser.managers[args.subcommand]
@@ -372,7 +503,6 @@ class Tests(unittest.TestCase):
 
     def test_option_groups(self):
         """Test that the option groups are added to the parser."""
-        # parser = CLIParser(parser_spec=json.loads(self.parser_spec))
         parser = CLIParser(parser_spec=self.parser_spec)
         self.assertIsInstance(parser, CLIParser)
         self.assertIsNotNone(parser.groups)
@@ -385,7 +515,6 @@ class Tests(unittest.TestCase):
 
     def test_mutually_exclusive_groups(self):
         """Test that the mutually exclusive groups are added to the parser."""
-        # parser = CLIParser(parser_spec=json.loads(self.parser_spec))
         parser = CLIParser(parser_spec=self.parser_spec)
         self.assertIsInstance(parser, CLIParser)
         self.assertIsNotNone(parser.mutually_exclusive_groups)
@@ -393,3 +522,23 @@ class Tests(unittest.TestCase):
         self.assertIn('mutex_group', parser.mutually_exclusive_groups)
         self.assertIsInstance(parser.mutually_exclusive_groups['mutex_group'], argparse._MutuallyExclusiveGroup)
         self.assertIsInstance(parser.mutually_exclusive_groups, dict)
+
+    def test_parent_parser(self):
+        """Test that the parent parser is added to the parser."""
+        parser = CLIParser(parser_spec=self.parser_spec)
+        self.assertIsInstance(parser.parent_parsers, dict)
+        self.assertIn('parent1', parser.parent_parsers)
+        self.assertIsInstance(parser.parent_parsers['parent1'], argparse.ArgumentParser)
+        sys.argv = shlex.split('oil -n something command --config-file /path/to/file --dry-run'
+                               ' input.txt -o output.txt --verbose')
+        args = parser.parse_args()
+        self.assertEqual(pathlib.Path('/path/to/file'), args.config_file)
+        self.assertTrue(args.dry_run)
+        self.assertEqual('input.txt', args.input_file)
+        self.assertEqual('output.txt', args.o)
+        self.assertTrue(args.verbose)
+
+    # def test_config(self):
+    #     """Test that we can define a config file"""
+    #     parser = CLIParser(parser_spec=self.parser_spec)
+    #     self.assertIsInstance(parser.configs, LocalConfigParser)
