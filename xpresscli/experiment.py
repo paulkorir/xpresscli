@@ -6,11 +6,13 @@ import importlib
 import inspect
 import json
 import os
+import pathlib
 import shlex
 import sys
 import unittest
-import pathlib
 from typing import Union, Optional, Iterable, List
+
+_ = pathlib.Path  # prevent pycharm from removing the import
 
 
 def parse_options(parser, options):
@@ -19,6 +21,8 @@ def parse_options(parser, options):
         specs = json.loads(options)
     elif isinstance(options, list):
         specs = options
+    elif options is None:
+        specs = []
     else:
         raise TypeError(f"json_specs must be a string or list, not {type(options)}")
     for arg_spec in specs:
@@ -36,6 +40,8 @@ def parse_groups(parser, groups):
         specs = json.loads(groups)
     elif isinstance(groups, list):
         specs = groups
+    elif groups is None:
+        specs = []
     else:
         raise TypeError(f"json_specs must be a string or list, not {type(groups)}")
     groups = dict()
@@ -53,6 +59,8 @@ def parse_mutually_exclusive_groups(parser, mutex_groups):
         specs = json.loads(mutex_groups)
     elif isinstance(mutex_groups, list):
         specs = mutex_groups
+    elif mutex_groups is None:
+        specs = []
     else:
         raise TypeError(f"json_specs must be a string or list, not {type(mutex_groups)}")
     mutex_groups = dict()
@@ -71,8 +79,10 @@ def parse_parents(parent_parsers_spec) -> Dict[argparse.ArgumentParser]:
         specs = json.loads(parent_parsers_spec)
     elif isinstance(parent_parsers_spec, list):
         specs = parent_parsers_spec
+    elif parent_parsers_spec is None:
+        specs = []
     else:
-        raise TypeError(f"json_specs must be a string or list, not {type(parent_parsers_spec)}")
+        raise TypeError(f"json_specs must be None, a string or list, not {type(parent_parsers_spec)}")
     parent_parsers = dict()
     for parent_spec in specs:
         name = parent_spec['prog']
@@ -542,3 +552,346 @@ class Tests(unittest.TestCase):
     #     """Test that we can define a config file"""
     #     parser = CLIParser(parser_spec=self.parser_spec)
     #     self.assertIsInstance(parser.configs, LocalConfigParser)
+
+
+class TestOil(unittest.TestCase):
+    """Test using expresscli on the oil project github.com/emdb-empiar/oil"""
+
+    def setUp(self):
+        LIMIT_COUNT = 1000
+        MIN_MEMORY = 1024
+        MAX_MEMORY = 128000
+        # MIN_ARRAY_SIZE = 2
+        # MAX_ARRAY_SIZE = 100
+        self.parser_spec = {
+            "parser": {
+                "prog": "oil",
+                "description": "process and load .map files into OMERO for the Volume Browser",
+                "parent_parsers": [
+                    {
+                        "prog": "parent1",
+                        "add_help": False,
+                        "options": [
+                            {
+                                "flag": ["--dry-run"],
+                                "help": "print out what would be done [default: False]",
+                                "action": "store_true"
+                            },
+                            {
+                                "flag": ["-c", "--config-file"],
+                                "type": "pathlib.Path",
+                                "help": "oil configs [default: value of OILCONF environment variable]"
+                            },
+                            {
+                                "flag": ["-v", "--verbose"],
+                                "help": "verbose output to terminal in addition to log files [default: False]",
+                                "action": "store_true"
+                            },
+                            {
+                                "flag": ["-d", "--debug"],
+                                "help": "debug [False]",
+                                "action": "store_true"
+                            },
+                            {
+                                "flag": ["--no-retry"],
+                                "help": "run async jobs sequentially i.e. if one fails, terminate immediately [False]",
+                            },
+                            {
+                                "flag": ["--no-summary"],
+                                "action": "store_true",
+                                "help": "do not display the oil status [False]",
+                            },
+                            {
+                                'flag': ['--lsf'],
+                                'default': False,
+                                'action': 'store_true',
+                                'help': "run the command on the job scheduler according to the configs [False]"
+                            },
+                            {
+                                'flag': ['--lsf-job-name'],
+                                'help': f"give the job a short meaningful name [default: None]"
+                            },
+                            {
+                                'flag': ['--lsf-memory'],
+                                'type': 'int',
+                                'default': 1024,
+                                'help': f"run the command with this much memory requested in MiB e.g. 1024 = 1024MiB = 1GiB; valid values in range {MIN_MEMORY}-{MAX_MEMORY} [{MIN_MEMORY}]"
+                            },
+                            {
+                                'flag': ['--lsf-depends-on'],
+                                'help': f"wait for the job of the specified ID to complete first"
+                            },
+                            {
+                                'flag': ['--lsf-array-size'],
+                                'type': 'int',
+                                'help': f"run builds in parallel by spawning an job array of this size [1]"
+                            }
+                        ]
+                    }
+                ],
+                "subparsers": {
+                    "dest": "command",
+                    "title": "Tools",
+                    "help": "oil utilities",
+                    "required": True,
+                    "commands": [
+                        {
+                            "name": "init",
+                            "help": "initialise oil",
+                            "description": "initialise an oil installation by creating resource directories",
+                            "parents": ["parent1"],
+                            "manager": "oil.handlers.init"
+                        },
+                        {
+                            "name": "status",
+                            "description": "print the status of oil",
+                            "help": "display the status of oil",
+                            "parents": ["parent1"],
+                            "manager": "oil.handlers.status"
+                        },
+                        {
+                            "name": "load",
+                            "description": "prepare params, build image files and import metadata into OMERO for a single entry",
+                            "help": "load the entry specified by ID",
+                            "parents": ["parent1"],
+                            "manager": "oil.handlers.load",
+                            "options": [
+                                {
+                                    'flag': ['--use-ssh'],
+                                    'action': 'store_true',
+                                    'help': "run import through an SSH call [False]"
+                                },
+                                {
+                                    'flag': ['--force'],
+                                    'action': 'store_true',
+                                    'help': "'y' by default [False]"
+                                },
+                                {
+                                    'flag': ['--purge'],
+                                    'action': "store_true",
+                                    'help': "purge an existing entry before load [False]"
+                                },
+                                {
+                                    'flag': ['--map-dir'],
+                                    'help': "a comma-separated (no spaces) sequence of paths to search for files; "
+                                            "by default we read the value from configs; this option overrides configs"
+                                },
+                                {
+                                    'flag': ['-x', '--extension'],
+                                    'help': "the extension use"
+                                },
+                                {
+                                    'flag': ['--limit'],
+                                    'type': 'int',
+                                    'default': LIMIT_COUNT,
+                                    'help': f"limit the number of entries processed at any one time; "
+                                            f"to remove the limit set limit to zero [default: {LIMIT_COUNT}]"
+                                },
+                            ],
+                            "mutually_exclusive_groups": [
+                                {
+                                    "title": "load_input_group",
+                                    "required": False,
+                                    "options": [
+                                        {
+                                            'flag': ['-e', '--entry-name'],
+                                            'help': "name of the entry e.g. emd_1234 or empiar_12345"
+                                        },
+                                        {
+                                            'flag': ['-p', '--entry-path'],
+                                            'action': 'append',
+                                            'type': 'pathlib.Path',
+                                            'help': "the relative/absolute path to the entry file e.g. /path/to/emd_1234.map; "
+                                                    "the file must be a canonically named file; "
+                                                    "this option takes precedence over --map-dir and configs[dirs][map_dir] [default: None]"
+                                        },
+                                        {
+                                            'flag': ['-f', '--entries-file'],
+                                            'type': 'pathlib.Path',
+                                            'help': "name of a file with a list of entry names"
+                                        },
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "name": "prep",
+                            "description": "runs the prep step which generates all build parameters",
+                            "help": "prepare entry parameters for build",
+                            "parents": ["parent1"],
+                            "manager": "oil.handlers.prep",
+                            "options": [
+                                {
+                                    'flag': ['--use-ssh'],
+                                    'action': 'store_true',
+                                    'help': "run import through an SSH call [False]"
+                                },
+                                {
+                                    'flag': ['--map-dir'],
+                                    'help': "a comma-separated (no spaces) sequence of paths to search for files; "
+                                            "by default we read the value from configs; this option overrides configs"
+                                },
+                                {
+                                    'flag': ['-x', '--extension'],
+                                    'help': "the extension use"
+                                },
+                                {
+                                    'flag': ['--limit'],
+                                    'type': 'int',
+                                    'default': LIMIT_COUNT,
+                                    'help': f"limit the number of entries processed at any one time; "
+                                            f"to remove the limit set limit to zero [default: {LIMIT_COUNT}]"
+                                },
+                            ],
+                            "mutually_exclusive_groups": [
+                                {
+                                    "title": "prep_input_group",
+                                    "required": False,
+                                    "options": [
+                                        {
+                                            'flag': ['-e', '--entry-name'],
+                                            'help': "name of the entry e.g. emd_1234 or empiar_12345"
+                                        },
+                                        {
+                                            'flag': ['-p', '--entry-path'],
+                                            'action': 'append',
+                                            'type': 'pathlib.Path',
+                                            'help': "the relative/absolute path to the entry file e.g. /path/to/emd_1234.map; "
+                                                    "the file must be a canonically named file; "
+                                                    "this option takes precedence over --map-dir and configs[dirs][map_dir] [default: None]"
+                                        },
+                                        {
+                                            'flag': ['-f', '--entries-file'],
+                                            'type': 'pathlib.Path',
+                                            'help': "name of a file with a list of entry names"
+                                        },
+                                        {
+                                            'flag': ['-j', '--entries-json'],
+                                            'type': 'pathlib.Path',
+                                            'help': "name of a JSON file with the entries in a field called 'entries' as a list"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+        self.parser = CLIParser(parser_spec=self.parser_spec)
+        self.cli = lambda command_str: self.parser.parse_args(shlex.split(command_str))
+        self.TEST_CONFIG_PATH = pathlib.Path(__file__).parent / 'test_config.ini'
+        # os.environ['OILCONF'] = str(self.TEST_CONFIG_PATH)
+
+        # def tearDown(self):
+        #     del os.environ['OILCONF']
+
+    def test_init(self):
+        """Test oil initialisation"""
+        args = self.cli(f'init --config-file {self.TEST_CONFIG_PATH}')
+        self.assertEqual('init', args.command)
+        self.assertFalse(args.dry_run)
+        self.assertFalse(args.verbose)
+        self.assertEqual(args.config_file, self.TEST_CONFIG_PATH)
+        self.assertFalse(args.debug)
+
+    def test_status(self):
+        """Test oil status"""
+        args = self.cli(f'status --config-file {self.TEST_CONFIG_PATH}')
+        self.assertEqual('status', args.command)
+        self.assertFalse(args.dry_run)
+        self.assertFalse(args.verbose)
+        self.assertEqual(args.config_file, self.TEST_CONFIG_PATH)
+        self.assertFalse(args.debug)
+
+    def test_load(self):
+        """Test oil load"""
+        args = self.cli(f"load -e emd_1234 --config-file {self.TEST_CONFIG_PATH}")
+        self.assertEqual(args.command, 'load')
+        self.assertFalse(args.dry_run)
+        self.assertEqual(args.entry_name, 'emd_1234')
+        self.assertFalse(args.purge)
+        self.assertFalse(args.force)
+        self.assertIsNone(args.map_dir)
+        self.assertIsNone(args.extension)
+        self.assertFalse(args.no_summary)
+        self.assertEqual(args.limit, 1000)
+        args = self.cli(f"load -p /path/to/emd_1234.map --config-file {self.TEST_CONFIG_PATH}")
+        self.assertEqual(
+            [
+                pathlib.Path('/path/to/emd_1234.map'),
+            ],
+            args.entry_path
+        )
+        args = self.cli(f"load -f /path/to/entries.txt --config-file {self.TEST_CONFIG_PATH}")
+        self.assertEqual(
+            pathlib.Path('/path/to/entries.txt'),
+            args.entries_file
+        )
+        args = self.cli(f"load --no-summary --config-file {self.TEST_CONFIG_PATH}")
+        self.assertTrue(args.no_summary)
+        args = self.cli(f"load -e emd_1234 --purge --force --config-file {self.TEST_CONFIG_PATH}")
+        self.assertTrue(args.purge)
+        self.assertTrue(args.force)
+        args = self.cli(f"load -c {self.TEST_CONFIG_PATH} --use-ssh -e emd_1234")
+        self.assertTrue(args.use_ssh)
+
+    def test_prep(self):
+        """Test oil prep"""
+        args = self.cli(f"prep --config-file {self.TEST_CONFIG_PATH}")
+        self.assertEqual(args.command, 'prep')
+        self.assertEqual(args.limit, 1000)
+        self.assertFalse(args.dry_run)
+        self.assertIsNone(args.entry_name)
+        self.assertIsNone(args.entries_file)
+        self.assertFalse(args.verbose)
+        self.assertEqual(args.config_file, self.TEST_CONFIG_PATH)
+        self.assertFalse(args.debug)
+        self.assertFalse(args.no_retry)
+        args = self.cli(f"prep -c {self.TEST_CONFIG_PATH} --use-ssh")
+        self.assertTrue(args.use_ssh)
+        # self.assertTrue(args._configs.getboolean('omero', 'use_ssh'))
+        # new_path = secrets.token_urlsafe(random.randint(10, 20))
+        # os.mkdir(new_path)
+        # args = self.cli(f"prep --map-dir {new_path}")
+        # map_dir = args._configs.get('dirs', 'map_dir')
+        # self.assertEqual(map_dir, os.path.join(os.path.dirname(os.path.dirname(__file__)), new_path))
+        # # map_dir must be abs path
+        # self.assertTrue(os.path.isabs(map_dir))
+        # os.rmdir(new_path)
+        # self.assertFalse(os.path.exists(new_path))
+
+    def test_build(self):
+        """Test oil build"""
+        parser = CLIParser(parser_spec=self.parser_spec)
+        print(parser.print_help())
+
+    def test_import(self):
+        """Test oil import"""
+
+    def test_reset(self):
+        """Test oil reset"""
+
+    def test_clean(self):
+        """Test oil clean"""
+
+    def test_list(self):
+        """Test oil list"""
+
+    def test_search(self):
+        """Test oil search"""
+
+    def test_delete(self):
+        """Test oil delete"""
+
+    def test_purge(self):
+        """Test oil purge"""
+
+    def test_fix(self):
+        """Test oil fix"""
+
+    def test_sync(self):
+        """Test oil sync"""
+
+    def test_collate(self):
+        """Test oil collate"""
